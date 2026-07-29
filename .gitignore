@@ -1,3 +1,6 @@
+# Work out the algos in notebooks, then clean up
+*.ipynb
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
