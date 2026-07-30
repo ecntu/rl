@@ -1,3 +1,4 @@
+import numpy as np
 import jax.numpy as jnp
 import flax.nnx as nnx
 import optax
@@ -16,6 +17,7 @@ class Policy(nnx.Module):
     def __call__(self, state):
         return self.net(state)
 
+    @nnx.jit
     def sample_action(self, state, rngs):
         logits = self(state)
         return rngs.categorical(logits)
@@ -29,8 +31,8 @@ class Policy(nnx.Module):
 
 def collect_trajectories(env, policy, rngs, steps_per_batch, disc_factor):
 
-    # note: we can avoid having a `episode` dim/axis since the loss doesn't really care about it
-    # TODO maybe init as empty here
+    # note: we can avoid having an `episode` dim/axis since the loss doesn't really care about it
+
     states, actions, returns = [], [], []  # returns are used for weighting
 
     eps_sum_rewards = []  # for logging
@@ -49,14 +51,14 @@ def collect_trajectories(env, policy, rngs, steps_per_batch, disc_factor):
         state = new_state
 
         if terminated or truncated or len(states) >= steps_per_batch:  # end of episode
-            discounted_return = jnp.array(curr_eps_rewards) @ (disc_factor ** jnp.arange(len(curr_eps_rewards)))
+            discounted_return = np.array(curr_eps_rewards) @ (disc_factor ** np.arange(len(curr_eps_rewards)))
             returns.extend([discounted_return] * len(curr_eps_rewards))
 
             if terminated or truncated:  # to avoid deflating with last truncated episode
                 eps_sum_rewards.append(sum(curr_eps_rewards))
 
             curr_eps_rewards = []
-            state, _ = env.reset()  # TODO need seed here?
+            state, _ = env.reset()
 
     return jnp.array(states), jnp.array(actions), jnp.array(returns), jnp.array(eps_sum_rewards)
 
@@ -79,12 +81,14 @@ class Config:
 
 if __name__ == "__main__":
     cfg = simple_parsing.parse(Config)
+
     env = gym.make(cfg.env)  # try batched/async ones
-    policy = Policy(
-        state_dim=env.observation_space.shape[0], hidden_dim=32, action_dim=env.action_space.n, rngs=nnx.Rngs(cfg.seed)
-    )
-    opt = nnx.Optimizer(policy, optax.adam(learning_rate=cfg.lr), wrt=nnx.Param)
+    env.reset(seed=cfg.seed)
+    state_dim = env.observation_space.shape[0]
+
     rngs = nnx.Rngs(cfg.seed)
+    policy = Policy(state_dim=state_dim, hidden_dim=32, action_dim=env.action_space.n, rngs=rngs)
+    opt = nnx.Optimizer(policy, optax.adam(learning_rate=cfg.lr), wrt=nnx.Param)
 
     @nnx.jit
     def train_step(policy, opt, states, actions, returns):
