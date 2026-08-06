@@ -93,6 +93,13 @@ def loss_fn(policy, states, actions, logprob_weights, norm_weights):
     return -(logprobs * logprob_weights).mean()
 
 
+@nnx.jit(static_argnames=("cfg",))
+def train_step(policy, opt, states, actions, logprob_weights, cfg):
+    loss, grads = nnx.value_and_grad(loss_fn)(policy, states, actions, logprob_weights, norm_weights=cfg.norm_weights)
+    opt.update(policy, grads)
+    return loss, optax.global_norm(grads)
+
+
 @dataclass(frozen=True)
 class Config:
     pg_type: Literal["plain", "true_rtg", "common_rtg"] = "plain"
@@ -118,19 +125,11 @@ if __name__ == "__main__":
 
     calc_returns_fn = partial(calc_returns, type=cfg.pg_type, disc_factor=cfg.disc_factor)
 
-    @nnx.jit
-    def train_step(policy, opt, states, actions, logprob_weights):
-        loss, grads = nnx.value_and_grad(loss_fn)(
-            policy, states, actions, logprob_weights, norm_weights=cfg.norm_weights
-        )
-        opt.update(policy, grads)
-        return loss, optax.global_norm(grads)
-
     for i in range(cfg.epochs):
         states, actions, logprob_weights, eps_sum_rewards = collect_trajectories(
             env, policy, rngs, steps_per_batch=cfg.steps_per_batch, calc_returns_fn=calc_returns_fn
         )
-        loss, grad_norm = train_step(policy, opt, states, actions, logprob_weights)
+        loss, grad_norm = train_step(policy, opt, states, actions, logprob_weights, cfg)
         print(
             f"{i + 1:>3}/{cfg.epochs} loss: {loss:.4f}, grad norm: {grad_norm:.4f}, mean reward: {eps_sum_rewards.mean():.4f}"
         )
